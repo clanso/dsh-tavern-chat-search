@@ -1,0 +1,3 @@
+node_modules/
+.tavern-entry.mjs
+.tavern-status.json

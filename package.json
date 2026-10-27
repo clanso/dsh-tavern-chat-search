@@ -1,0 +1,27 @@
+{
+  "name": "dsh-tavern-chat-search",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "搜对话：在 DSH Tavern 侧栏按关键词翻聊天记录（这一局或全部局），记不清原词时让 AI 按情节帮你定位，点结果跳到那一句。可选语义检索。",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/clanso/dsh-tavern-chat-search.git"
+  },
+  "exports": {
+    ".": "./index.mjs",
+    "./client": "./client.js"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": [
+        "dsh-tavern-plugin"
+      ]
+    }
+  }
+}
