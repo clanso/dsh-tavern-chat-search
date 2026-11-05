@@ -52,14 +52,19 @@ window.__ModuleLoader__.load({
     const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
 
     // ───── 跳到某一轮：和 Tavern 自己的轮次导轨一样，找 data-chat-turn 那一行，找不到就点「更早」加载再找 ─────
+    // 只在聊天记录里找（和酒馆自己的轮次导轨一样以 data-conversation-scroll 为范围），免得点到侧栏里的东西
+    function conversation() {
+      const all = [...document.querySelectorAll('[data-conversation-scroll]')].filter(node => node.getBoundingClientRect().height > 0)
+      return all[0] || document
+    }
     function rowOf(turn) {
-      for (const row of document.querySelectorAll('[data-chat-turn="' + turn + '"]')) {
+      for (const row of conversation().querySelectorAll('[data-chat-turn="' + turn + '"]')) {
         if (row.getBoundingClientRect().height > 0) return row
       }
       return null
     }
     function loadEarlier() {
-      const box = document.querySelector('[class*="_older"]')
+      const box = conversation().querySelector('[class*="_older"]')
       const button = box && box.querySelector('button')
       if (!button || button.disabled) return false
       button.click()
@@ -81,7 +86,7 @@ window.__ModuleLoader__.load({
       return out
     }
     function locate(turn, anchor) {
-      const rows = [...document.querySelectorAll('[data-chat-turn="' + turn + '"]')].filter(row => row.getBoundingClientRect().height > 0)
+      const rows = [...conversation().querySelectorAll('[data-chat-turn="' + turn + '"]')].filter(row => row.getBoundingClientRect().height > 0)
       if (!rows.length || !anchor) return null
       let norm = ''
       const map = [] // 规范化后每个字 → [文字节点, 节点里的位置]
@@ -110,10 +115,28 @@ window.__ModuleLoader__.load({
       }
       return null
     }
+    // 只滚聊天记录自己的滚动框，不用 scrollIntoView：它会连带滚动所有外层（页面本身、侧栏外壳），
+    // 跳转后「搜对话」侧栏会被收起来。
+    function scrollBoxOf(element) {
+      const own = element.closest && element.closest('[data-conversation-scroll]')
+      if (own && own.scrollHeight > own.clientHeight + 1) return own
+      for (let node = element.parentElement; node && node !== document.body && node !== document.documentElement; node = node.parentElement) {
+        const style = getComputedStyle(node)
+        if (/(auto|scroll|overlay)/.test(style.overflowY) && node.scrollHeight > node.clientHeight + 1) return node
+      }
+      return null
+    }
+    function bringIntoView(element, where) {
+      const box = scrollBoxOf(element)
+      if (!box) return
+      const offset = element.getBoundingClientRect().top - box.getBoundingClientRect().top
+      const top = box.scrollTop + offset - (where === 'center' ? box.clientHeight / 2 - element.getBoundingClientRect().height / 2 : 12)
+      try { box.scrollTo({ top: Math.max(0, top), behavior: 'smooth' }) } catch (error) { box.scrollTop = Math.max(0, top) }
+    }
     let styled = false
     function mark(range) {
       const target = range.startContainer.parentElement
-      try { target.scrollIntoView({ block: 'center', behavior: 'smooth' }) } catch (error) { target.scrollIntoView(true) }
+      bringIntoView(target, 'center')
       if (typeof CSS !== 'undefined' && CSS.highlights && typeof Highlight === 'function') {
         if (!styled) {
           const style = document.createElement('style')
@@ -132,7 +155,7 @@ window.__ModuleLoader__.load({
         if (row) {
           const range = locate(turn, anchor)
           if (range) { mark(range); return true }
-          try { row.scrollIntoView({ block: 'start', behavior: 'smooth' }) } catch (error) { row.scrollIntoView(true) }
+          bringIntoView(row, 'start')
           flash(row)
           return true
         }
