@@ -51,6 +51,50 @@ window.__ModuleLoader__.load({
 
     const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
 
+    // ───── 面板状态记在模块里：跳到别的局时侧栏换成那一局的侧栏，面板会重新挂载，搜索框和结果要原样带过去 ─────
+    const memory = {}
+    function useKept(name, initial) {
+      const [value, setValue] = useState(() => name in memory ? memory[name] : initial)
+      const set = next => setValue(prev => { const v = typeof next === 'function' ? next(prev) : next; memory[name] = v; return v })
+      return [value, set]
+    }
+
+    // ───── 跳转后把「搜对话」留在右侧栏 ─────
+    // 右侧栏是每一局各一份的：切到别的局，显示的是那一局自己的侧栏；酒馆进局时还会自动打开并聚焦「酒馆状态」。
+    // 所以跳转后几秒内盯着，被换掉或收起就把本面板重新打开、展开（手机宽度下侧栏盖住正文，照酒馆的规矩不管）。
+    let host = null
+    function service(name) { try { return host && typeof host.get === 'function' ? host.get(name) : null } catch (error) { return null } }
+    function tabId(sidebar) {
+      const fallback = 'tavern-plugin:' + PLUGIN + ':search'
+      try {
+        if (sidebar.getTab && sidebar.getTab(fallback)) return fallback
+        const found = (sidebar.getTabs ? sidebar.getTabs() : []).find(tab => /^tavern-plugin:.*chat-search.*:search$/.test(tab.id))
+        if (found) return found.id
+      } catch (error) {}
+      return fallback
+    }
+    let keeping = 0
+    function keepPanel(sessionId, ms) {
+      const sidebar = service('betterSidebar')
+      const column = service('sidebarRight')
+      if (!sidebar || typeof sidebar.openTab !== 'function' || !sessionId) return
+      try { if (window.matchMedia && window.matchMedia('(max-width: 767px)').matches) return } catch (error) {}
+      const id = tabId(sidebar)
+      const run = ++keeping
+      const until = Date.now() + ms
+      const tick = () => {
+        if (run !== keeping) return
+        try {
+          const page = column && typeof column.active === 'function' ? column.active() : null
+          const showing = !column || typeof column.active !== 'function' || (page && (page.kind === id || page.contentId === id))
+          if (!showing) sidebar.openTab({ type: id }, { sessionId })
+          if (column && typeof column.isExpanded === 'function' && column.isExpanded() === false && typeof column.toggleExpanded === 'function') column.toggleExpanded()
+        } catch (error) {}
+        if (Date.now() < until) setTimeout(tick, 250)
+      }
+      tick()
+    }
+
     // ───── 跳到某一轮：和 Tavern 自己的轮次导轨一样，找 data-chat-turn 那一行，找不到就点「更早」加载再找 ─────
     // 只在聊天记录里找（和酒馆自己的轮次导轨一样以 data-conversation-scroll 为范围），免得点到侧栏里的东西
     function conversation() {
@@ -270,15 +314,15 @@ window.__ModuleLoader__.load({
     }
 
     function SearchPanel({ gameId, ui, workspace }) {
-      const [query, setQuery] = useState('')
-      const [scope, setScope] = useState('game')
-      const [who, setWho] = useState('all')
-      const [askOpen, setAskOpen] = useState(false)
-      const [describe, setDescribe] = useState('')
+      const [query, setQuery] = useKept('query', '')
+      const [scope, setScope] = useKept('scope', 'game')
+      const [who, setWho] = useKept('who', 'all')
+      const [askOpen, setAskOpen] = useKept('askOpen', false)
+      const [describe, setDescribe] = useKept('describe', '')
       const [busy, setBusy] = useState('')
       const [error, setError] = useState('')
-      const [outcome, setOutcome] = useState(null)
-      const [titles, setTitles] = useState({})
+      const [outcome, setOutcome] = useKept('outcome', null)
+      const [titles, setTitles] = useKept('titles', {})
       const [settingsOpen, setSettingsOpen] = useState(false)
       const [progress, setProgress] = useState(null)
       const shown = useRef(30)
@@ -323,8 +367,9 @@ window.__ModuleLoader__.load({
         if (item.gameId !== gameId) {
           if (!workspace || typeof workspace.openSession !== 'function') return '这条在另一局里：先在左边打开「' + (titles[item.gameId] || '那一局') + '」，再点一次「跳过去」。'
           try { await workspace.openSession(item.gameId) } catch (e) { return '切不过去（' + (e && e.message || e) + '）：先在左边打开那一局，再点一次「跳过去」。' }
+          keepPanel(item.gameId, 6000)
           await wait(1200)
-        }
+        } else keepPanel(gameId, 2500)
         const ok = await scrollToTurn(item.turn, anchor)
         return ok ? '' : '没在页面上找到第 ' + item.turn + ' 轮，可以先点「整轮」看原文。'
       }
@@ -387,6 +432,7 @@ window.__ModuleLoader__.load({
       inject: ['tavernUi'],
       apply(ctx) {
         const ui = ctx.tavernUi
+        host = ctx
         if (!ui || !(ui.apiVersion >= 2)) return
         // 切到别的局要用 DSH 的 uiWorkspace；没有就让玩家自己点开那一局。
         let workspace = null
